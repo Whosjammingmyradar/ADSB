@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ADS-B Live Tracker</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #0b0f1e; font-family: 'Courier New', monospace; color: #c8d8ff; overflow: hidden; }
+    #map { width: 100vw; height: 100vh; }
+
+    /* ── Header bar ── */
+    #header {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+      display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+      background: rgba(10,14,28,0.92); backdrop-filter: blur(8px);
+      border-bottom: 1px solid #1e3060;
+    }
+    #header h1 { font-size: 15px; letter-spacing: 3px; color: #4af; text-transform: uppercase; white-space: nowrap; }
+    #header .dot { width: 8px; height: 8px; border-radius: 50%; background: #0f0; animation: pulse 1.4s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+    #status { font-size: 11px; color: #7a9; }
+    #count  { font-size: 11px; color: #adf; margin-left: auto; }
+
+    /* ── Search box ── */
+    #search-wrap { display: flex; gap: 6px; }
+    #searchBox {
+      background: #111827; border: 1px solid #1e3060; color: #c8d8ff;
+      padding: 4px 10px; border-radius: 4px; font-family: inherit; font-size: 12px; width: 150px;
+    }
+    #searchBox:focus { outline: none; border-color: #4af; }
+    #searchBtn {
+      background: #4af; color: #000; border: none; padding: 4px 10px;
+      border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold;
+    }
+
+    /* ── Filters ── */
+    #filters { display: flex; gap: 6px; }
+    .filter-btn {
+      background: #111827; border: 1px solid #1e3060; color: #8aacff;
+      padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;
+    }
+    .filter-btn.active { background: #4af; color: #000; border-color: #4af; }
+
+    /* ── Detail panel ── */
+    #panel {
+      position: fixed; top: 50px; right: 0; bottom: 0; width: 280px; z-index: 900;
+      background: rgba(8,12,24,0.96); border-left: 1px solid #1e3060;
+      transform: translateX(100%); transition: transform .3s ease;
+      overflow-y: auto; padding: 16px;
+    }
+    #panel.open { transform: translateX(0); }
+    #panel h2 { font-size: 18px; color: #4af; margin-bottom: 4px; }
+    #panel .sub { font-size: 11px; color: #678; margin-bottom: 14px; }
+    .info-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #111827; font-size: 12px; }
+    .info-row .label { color: #678; }
+    .info-row .val { color: #c8d8ff; font-weight: bold; }
+    #closePanel { float: right; background: none; border: none; color: #678; font-size: 18px; cursor: pointer; }
+
+    /* ── Legend ── */
+    #legend {
+      position: fixed; bottom: 20px; left: 16px; z-index: 900;
+      background: rgba(8,12,24,0.88); border: 1px solid #1e3060;
+      border-radius: 6px; padding: 10px 14px; font-size: 11px;
+    }
+    #legend h4 { color: #678; margin-bottom: 6px; letter-spacing: 1px; }
+    .leg-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .leg-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+    /* ── Refresh indicator ── */
+    #refreshBar {
+      position: fixed; bottom: 0; left: 0; right: 0; height: 2px; z-index: 1001;
+      background: #1e3060;
+    }
+    #refreshProgress {
+      height: 100%; width: 0%; background: #4af;
+      transition: width linear;
+    }
+  </style>
+</head>
+<body>
+
+<div id="header">
+  <div class="dot"></div>
+  <h1>✈ ADS-B LIVE</h1>
+  <span id="status">Connecting…</span>
+  <div id="search-wrap">
+    <input id="searchBox" type="text" placeholder="Callsign / hex…" />
+    <button id="searchBtn">GO</button>
+  </div>
+  <div id="filters">
+    <button class="filter-btn active" data-filter="all">ALL</button>
+    <button class="filter-btn" data-filter="mil">MIL</button>
+    <button class="filter-btn" data-filter="ground">GND</button>
+  </div>
+  <span id="count">— aircraft</span>
+</div>
+
+<div id="map"></div>
+
+<div id="panel">
+  <button id="closePanel">✕</button>
+  <h2 id="p-callsign">———</h2>
+  <div class="sub" id="p-type"></div>
+  <div id="p-body"></div>
+</div>
+
+<div id="legend">
+  <h4>ALTITUDE (ft)</h4>
+  <div class="leg-row"><div class="leg-dot" style="background:#f55"></div> &lt; 5,000</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#fa0"></div> 5,000–15,000</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#ff0"></div> 15,000–25,000</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#0f0"></div> 25,000–35,000</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#4af"></div> &gt; 35,000</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#888"></div> On ground</div>
+</div>
+
+<div id="refreshBar"><div id="refreshProgress"></div></div>
+
+<script>
+// ─── Map setup ───────────────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: false, attributionControl: false })
+  .setView([30, 0], 3);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  maxZoom: 18, subdomains: 'abcd'
+}).addTo(map);
+
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+L.control.attribution({ prefix: 'Data: <a href="https://adsb.fi" style="color:#4af">adsb.fi</a> · Map: CartoDB' })
+  .addTo(map);
+
+// ─── State ───────────────────────────────────────────────────────────────────
+const REFRESH_MS   = 12000;    // 12 s (respects 1 req/s rate limit with margin)
+const markers      = {};       // hex → L.marker
+let   aircraft     = [];       // raw array from API
+let   activeFilter = 'all';
+let   selectedHex  = null;
+let   refreshTimer = null;
+let   progressTimer= null;
+
+// ─── Colour by altitude ──────────────────────────────────────────────────────
+function altColor(ac) {
+  if (ac.on_ground) return '#888';
+  const alt = ac.alt_baro ?? ac.alt_geom ?? 0;
+  if (alt < 5000)  return '#f55';
+  if (alt < 15000) return '#fa0';
+  if (alt < 25000) return '#ff0';
+  if (alt < 35000) return '#0f0';
+  return '#4af';
+}
+
+// ─── SVG aircraft icon ───────────────────────────────────────────────────────
+function planeIcon(color, heading, isMil) {
+  const rot = heading ?? 0;
+  const body = isMil ? '#f80' : color;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
+    <g transform="rotate(${rot},14,14)">
+      <!-- fuselage -->
+      <ellipse cx="14" cy="14" rx="2.5" ry="8" fill="${body}" opacity="0.95"/>
+      <!-- wings -->
+      <polygon points="14,12 4,18 24,18" fill="${body}" opacity="0.85"/>
+      <!-- tail -->
+      <polygon points="14,20 9,24 19,24" fill="${body}" opacity="0.8"/>
+      <!-- nose dot -->
+      <circle cx="14" cy="6.5" r="2" fill="white" opacity="0.6"/>
+    </g>
+  </svg>`;
+  return L.divIcon({
+    html: svg,
+    className: '',
+    iconSize: [28, 28],
+    iconAnchor: [14, 14]
+  });
+}
+
+// ─── Fetch from adsb.fi ───────────────────────────────────────────────────────
+async function fetchFlights() {
+  const bounds = map.getBounds();
+  const lat  = ((bounds.getNorth() + bounds.getSouth()) / 2).toFixed(4);
+  const lon  = ((bounds.getEast()  + bounds.getWest())  / 2).toFixed(4);
+
+  // Radius from centre to corner in NM (1 deg ≈ 60 NM), capped at 250
+  const latDiff = (bounds.getNorth() - bounds.getSouth()) / 2;
+  const lonDiff = (bounds.getEast()  - bounds.getWest())  / 2;
+  const dist    = Math.min(250, Math.ceil(Math.max(latDiff, lonDiff) * 70));
+
+  const url = `https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${dist}`;
+
+  try {
+    const res  = await fetch(url);
+    const data = await res.json();
+    aircraft = (data.aircraft ?? data.ac ?? []).filter(ac => ac.lat && ac.lon);
+    updateStatus(`Updated ${new Date().toLocaleTimeString()}`, aircraft.length);
+    renderMarkers();
+  } catch (e) {
+    updateStatus('⚠ API error — retrying…', null);
+  }
+}
+
+function updateStatus(msg, n) {
+  document.getElementById('status').textContent = msg;
+  if (n !== null) document.getElementById('count').textContent = `${n} aircraft`;
+}
+
+// ─── Render markers ──────────────────────────────────────────────────────────
+function renderMarkers() {
+  const visible = applyFilter(aircraft);
+  const visibleHex = new Set(visible.map(a => a.hex));
+
+  // Remove stale
+  Object.keys(markers).forEach(hex => {
+    if (!visibleHex.has(hex)) { map.removeLayer(markers[hex]); delete markers[hex]; }
+  });
+
+  visible.forEach(ac => {
+    const color   = altColor(ac);
+    const isMil   = ac.military === true || ac.mil === true;
+    const icon    = planeIcon(color, ac.track ?? ac.true_heading, isMil);
+    const tooltip = `<b>${ac.flight?.trim() || ac.hex}</b><br>
+      ${ac.t ?? ''} · ${ac.r ?? ''}<br>
+      Alt: ${ac.alt_baro ?? '—'} ft<br>
+      Spd: ${ac.gs ?? '—'} kts`;
+
+    if (markers[ac.hex]) {
+      markers[ac.hex].setLatLng([ac.lat, ac.lon]);
+      markers[ac.hex].setIcon(icon);
+    } else {
+      const m = L.marker([ac.lat, ac.lon], { icon })
+        .bindTooltip(tooltip, { className: 'adsb-tip', direction: 'top', offset: [0,-10] })
+        .addTo(map);
+      m.on('click', () => openPanel(ac.hex));
+      markers[ac.hex] = m;
+    }
+  });
+}
+
+// ─── Filter logic ────────────────────────────────────────────────────────────
+function applyFilter(list) {
+  if (activeFilter === 'mil')    return list.filter(a => a.military || a.mil);
+  if (activeFilter === 'ground') return list.filter(a => a.on_ground);
+  return list;
+}
+
+// ─── Detail panel ────────────────────────────────────────────────────────────
+function openPanel(hex) {
+  const ac = aircraft.find(a => a.hex === hex);
+  if (!ac) return;
+  selectedHex = hex;
+
+  document.getElementById('p-callsign').textContent = ac.flight?.trim() || ac.hex.toUpperCase();
+  document.getElementById('p-type').textContent =
+    [ac.desc, ac.t, ac.r].filter(Boolean).join(' · ') || 'Unknown type';
+
+  const rows = [
+    ['ICAO Hex',    ac.hex?.toUpperCase()],
+    ['Registration',ac.r],
+    ['Type Code',   ac.t],
+    ['Altitude',    ac.alt_baro != null ? `${ac.alt_baro.toLocaleString()} ft` : (ac.on_ground ? 'On ground' : '—')],
+    ['Ground Speed',ac.gs != null ? `${Math.round(ac.gs)} kts` : '—'],
+    ['True Track',  ac.track != null ? `${Math.round(ac.track)}°` : '—'],
+    ['Vert. Rate',  ac.baro_rate != null ? `${ac.baro_rate > 0 ? '▲' : '▼'} ${Math.abs(ac.baro_rate)} fpm` : '—'],
+    ['Squawk',      ac.squawk || '—'],
+    ['Source',      ac.type || '—'],
+    ['Position',    ac.lat != null ? `${ac.lat.toFixed(4)}°, ${ac.lon.toFixed(4)}°` : '—'],
+    ['Military',    (ac.military || ac.mil) ? '⚠ YES' : 'No'],
+  ];
+
+  document.getElementById('p-body').innerHTML = rows.map(([l,v]) =>
+    `<div class="info-row"><span class="label">${l}</span><span class="val">${v ?? '—'}</span></div>`
+  ).join('');
+
+  document.getElementById('panel').classList.add('open');
+  if (ac.lat && ac.lon) map.panTo([ac.lat, ac.lon]);
+}
+
+document.getElementById('closePanel').addEventListener('click', () => {
+  document.getElementById('panel').classList.remove('open');
+  selectedHex = null;
+});
+
+// ─── Search ──────────────────────────────────────────────────────────────────
+function doSearch() {
+  const q = document.getElementById('searchBox').value.trim().toLowerCase();
+  if (!q) return;
+  const found = aircraft.find(a =>
+    (a.flight?.trim().toLowerCase() === q) ||
+    (a.hex?.toLowerCase() === q) ||
+    (a.r?.toLowerCase() === q)
+  );
+  if (found) { openPanel(found.hex); }
+  else { updateStatus(`"${q}" not found in current view`, aircraft.length); }
+}
+
+document.getElementById('searchBtn').addEventListener('click', doSearch);
+document.getElementById('searchBox').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+// ─── Filters ─────────────────────────────────────────────────────────────────
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeFilter = btn.dataset.filter;
+    renderMarkers();
+  });
+});
+
+// ─── Refresh progress bar ────────────────────────────────────────────────────
+function startProgressBar() {
+  const bar = document.getElementById('refreshProgress');
+  bar.style.transition = 'none';
+  bar.style.width = '0%';
+  requestAnimationFrame(() => {
+    bar.style.transition = `width ${REFRESH_MS}ms linear`;
+    bar.style.width = '100%';
+  });
+}
+
+// ─── Auto-refresh ────────────────────────────────────────────────────────────
+function scheduleRefresh() {
+  fetchFlights();
+  startProgressBar();
+  clearInterval(refreshTimer);
+  refreshTimer = setInterval(() => { fetchFlights(); startProgressBar(); }, REFRESH_MS);
+}
+
+map.on('moveend', scheduleRefresh);
+
+// ─── Tooltip styling ─────────────────────────────────────────────────────────
+const style = document.createElement('style');
+style.textContent = `.adsb-tip {
+  background: rgba(8,14,30,0.95) !important;
+  border: 1px solid #1e3060 !important;
+  color: #c8d8ff !important;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  border-radius: 4px;
+  box-shadow: 0 2px 12px rgba(0,80,255,.2);
+}
+.adsb-tip::before { border-top-color: #1e3060 !important; }
+`;
+document.head.appendChild(style);
+
+// ─── Init ────────────────────────────────────────────────────────────────────
+scheduleRefresh();
+</script>
+</body>
+</html>
