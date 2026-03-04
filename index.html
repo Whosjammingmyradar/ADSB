@@ -1,93 +1,113 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ADS-B Live Tracker</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; background: #0b0f1e; font-family: 'Courier New', monospace; color: #c8d8ff; overflow: hidden; }
-    #map { width: 100vw; height: 100vh; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ADS-B Live Tracker</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #0b0f1e; font-family: 'Courier New', monospace; color: #c8d8ff; overflow: hidden; }
+  #map { width: 100vw; height: 100vh; }
 
-    /* ── Header bar ── */
-    #header {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
-      display: flex; align-items: center; gap: 12px; padding: 8px 16px;
-      background: rgba(10,14,28,0.92); backdrop-filter: blur(8px);
-      border-bottom: 1px solid #1e3060;
-    }
-    #header h1 { font-size: 15px; letter-spacing: 3px; color: #4af; text-transform: uppercase; white-space: nowrap; }
-    #header .dot { width: 8px; height: 8px; border-radius: 50%; background: #0f0; animation: pulse 1.4s infinite; }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
-    #status { font-size: 11px; color: #7a9; }
-    #count  { font-size: 11px; color: #adf; margin-left: auto; }
+  /* ── Header ── */
+  #header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+    display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+    background: rgba(10,14,28,0.95); backdrop-filter: blur(8px);
+    border-bottom: 1px solid #1e3060;
+  }
+  #header h1 { font-size: 15px; letter-spacing: 3px; color: #4af; text-transform: uppercase; white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #0f0; animation: pulse 1.4s infinite; flex-shrink: 0; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(0.8)} }
+  #status { font-size: 11px; color: #7a9; white-space: nowrap; }
+  #count  { font-size: 11px; color: #adf; margin-left: auto; white-space: nowrap; }
 
-    /* ── Search box ── */
-    #search-wrap { display: flex; gap: 6px; }
-    #searchBox {
-      background: #111827; border: 1px solid #1e3060; color: #c8d8ff;
-      padding: 4px 10px; border-radius: 4px; font-family: inherit; font-size: 12px; width: 150px;
-    }
-    #searchBox:focus { outline: none; border-color: #4af; }
-    #searchBtn {
-      background: #4af; color: #000; border: none; padding: 4px 10px;
-      border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold;
-    }
+  /* ── Search ── */
+  #search-wrap { display: flex; gap: 6px; }
+  #searchBox {
+    background: #111827; border: 1px solid #1e3060; color: #c8d8ff;
+    padding: 4px 10px; border-radius: 4px; font-family: inherit; font-size: 12px; width: 150px;
+  }
+  #searchBox:focus { outline: none; border-color: #4af; }
+  #searchBtn {
+    background: #4af; color: #000; border: none; padding: 4px 10px;
+    border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold;
+  }
+  #searchBtn:hover { background: #6cf; }
 
-    /* ── Filters ── */
-    #filters { display: flex; gap: 6px; }
-    .filter-btn {
-      background: #111827; border: 1px solid #1e3060; color: #8aacff;
-      padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;
-    }
-    .filter-btn.active { background: #4af; color: #000; border-color: #4af; }
+  /* ── Filter buttons ── */
+  #filters { display: flex; gap: 6px; }
+  .filter-btn {
+    background: #111827; border: 1px solid #1e3060; color: #8aacff;
+    padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; font-family: inherit;
+  }
+  .filter-btn.active { background: #4af; color: #000; border-color: #4af; font-weight: bold; }
+  .filter-btn:hover:not(.active) { border-color: #4af; color: #4af; }
 
-    /* ── Detail panel ── */
-    #panel {
-      position: fixed; top: 50px; right: 0; bottom: 0; width: 280px; z-index: 900;
-      background: rgba(8,12,24,0.96); border-left: 1px solid #1e3060;
-      transform: translateX(100%); transition: transform .3s ease;
-      overflow-y: auto; padding: 16px;
-    }
-    #panel.open { transform: translateX(0); }
-    #panel h2 { font-size: 18px; color: #4af; margin-bottom: 4px; }
-    #panel .sub { font-size: 11px; color: #678; margin-bottom: 14px; }
-    .info-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #111827; font-size: 12px; }
-    .info-row .label { color: #678; }
-    .info-row .val { color: #c8d8ff; font-weight: bold; }
-    #closePanel { float: right; background: none; border: none; color: #678; font-size: 18px; cursor: pointer; }
+  /* ── Detail panel ── */
+  #panel {
+    position: fixed; top: 42px; right: 0; bottom: 0; width: 290px; z-index: 900;
+    background: rgba(8,12,24,0.97); border-left: 1px solid #1e3060;
+    transform: translateX(100%); transition: transform .25s ease;
+    overflow-y: auto; padding: 16px;
+  }
+  #panel.open { transform: translateX(0); }
+  #panel-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
+  #p-callsign { font-size: 20px; color: #4af; letter-spacing: 2px; }
+  #p-type { font-size: 11px; color: #678; margin-top: 2px; }
+  #closePanel { background: none; border: 1px solid #1e3060; color: #678; font-size: 14px; cursor: pointer; border-radius: 4px; padding: 2px 8px; flex-shrink: 0; }
+  #closePanel:hover { color: #4af; border-color: #4af; }
+  .info-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid #0d1428; font-size: 12px; }
+  .info-row .label { color: #678; }
+  .info-row .val { color: #c8d8ff; font-weight: bold; text-align: right; }
+  .val.warn { color: #f80; }
+  .val.ok   { color: #0f0; }
+  #p-map-link { display: block; margin-top: 14px; text-align: center; padding: 8px; background: #111827; border: 1px solid #1e3060; border-radius: 4px; color: #4af; text-decoration: none; font-size: 12px; }
+  #p-map-link:hover { background: #1a2540; }
 
-    /* ── Legend ── */
-    #legend {
-      position: fixed; bottom: 20px; left: 16px; z-index: 900;
-      background: rgba(8,12,24,0.88); border: 1px solid #1e3060;
-      border-radius: 6px; padding: 10px 14px; font-size: 11px;
-    }
-    #legend h4 { color: #678; margin-bottom: 6px; letter-spacing: 1px; }
-    .leg-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-    .leg-dot { width: 10px; height: 10px; border-radius: 50%; }
+  /* ── Legend ── */
+  #legend {
+    position: fixed; bottom: 20px; left: 16px; z-index: 900;
+    background: rgba(8,12,24,0.9); border: 1px solid #1e3060;
+    border-radius: 6px; padding: 10px 14px; font-size: 11px;
+  }
+  #legend h4 { color: #678; margin-bottom: 8px; letter-spacing: 1px; font-size: 10px; }
+  .leg-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; color: #8aacff; }
+  .leg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 
-    /* ── Refresh indicator ── */
-    #refreshBar {
-      position: fixed; bottom: 0; left: 0; right: 0; height: 2px; z-index: 1001;
-      background: #1e3060;
-    }
-    #refreshProgress {
-      height: 100%; width: 0%; background: #4af;
-      transition: width linear;
-    }
-  </style>
+  /* ── Refresh bar ── */
+  #refreshBar { position: fixed; bottom: 0; left: 0; right: 0; height: 2px; z-index: 1001; background: #0d1428; }
+  #refreshProgress { height: 100%; width: 0%; background: linear-gradient(90deg, #4af, #0f0); transition: width linear; }
+
+  /* ── Loading overlay ── */
+  #loading {
+    position: fixed; inset: 0; z-index: 2000; background: #0b0f1e;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+  }
+  #loading h2 { color: #4af; letter-spacing: 4px; font-size: 20px; }
+  #loading p  { color: #678; font-size: 12px; }
+  .spinner { width: 40px; height: 40px; border: 3px solid #1e3060; border-top-color: #4af; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
 </head>
 <body>
 
+<!-- Loading screen -->
+<div id="loading">
+  <div class="spinner"></div>
+  <h2>✈ ADS-B LIVE</h2>
+  <p>Connecting to live feed…</p>
+</div>
+
+<!-- Header -->
 <div id="header">
   <div class="dot"></div>
   <h1>✈ ADS-B LIVE</h1>
   <span id="status">Connecting…</span>
   <div id="search-wrap">
-    <input id="searchBox" type="text" placeholder="Callsign / hex…" />
+    <input id="searchBox" type="text" placeholder="Callsign / hex…" autocomplete="off" />
     <button id="searchBtn">GO</button>
   </div>
   <div id="filters">
@@ -98,29 +118,41 @@
   <span id="count">— aircraft</span>
 </div>
 
+<!-- Map -->
 <div id="map"></div>
 
+<!-- Detail panel -->
 <div id="panel">
-  <button id="closePanel">✕</button>
-  <h2 id="p-callsign">———</h2>
-  <div class="sub" id="p-type"></div>
+  <div id="panel-header">
+    <div>
+      <div id="p-callsign">———</div>
+      <div id="p-type"></div>
+    </div>
+    <button id="closePanel">✕ Close</button>
+  </div>
   <div id="p-body"></div>
+  <a id="p-map-link" href="#" target="_blank">🗺 View on FlightAware</a>
 </div>
 
+<!-- Legend -->
 <div id="legend">
   <h4>ALTITUDE (ft)</h4>
-  <div class="leg-row"><div class="leg-dot" style="background:#f55"></div> &lt; 5,000</div>
-  <div class="leg-row"><div class="leg-dot" style="background:#fa0"></div> 5,000–15,000</div>
-  <div class="leg-row"><div class="leg-dot" style="background:#ff0"></div> 15,000–25,000</div>
-  <div class="leg-row"><div class="leg-dot" style="background:#0f0"></div> 25,000–35,000</div>
-  <div class="leg-row"><div class="leg-dot" style="background:#4af"></div> &gt; 35,000</div>
-  <div class="leg-row"><div class="leg-dot" style="background:#888"></div> On ground</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#f55"></div>&lt; 5,000</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#fa0"></div>5,000 – 15,000</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#ff0"></div>15,000 – 25,000</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#0f0"></div>25,000 – 35,000</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#4af"></div>&gt; 35,000</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#888"></div>On ground</div>
 </div>
 
+<!-- Refresh bar -->
 <div id="refreshBar"><div id="refreshProgress"></div></div>
 
 <script>
-// ─── Map setup ───────────────────────────────────────────────────────────────
+// ─── Config ──────────────────────────────────────────────────────────────────
+const REFRESH_MS = 10000; // 10 seconds
+
+// ─── Map init ─────────────────────────────────────────────────────────────────
 const map = L.map('map', { zoomControl: false, attributionControl: false })
   .setView([30, 0], 3);
 
@@ -129,22 +161,22 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
 }).addTo(map);
 
 L.control.zoom({ position: 'bottomright' }).addTo(map);
-L.control.attribution({ prefix: 'Data: <a href="https://adsb.fi" style="color:#4af">adsb.fi</a> · Map: CartoDB' })
-  .addTo(map);
+L.control.attribution({
+  prefix: 'Data: <a href="https://airplanes.live" style="color:#4af">airplanes.live</a> · Map: CartoDB'
+}).addTo(map);
 
-// ─── State ───────────────────────────────────────────────────────────────────
-const REFRESH_MS   = 12000;    // 12 s (respects 1 req/s rate limit with margin)
-const markers      = {};       // hex → L.marker
-let   aircraft     = [];       // raw array from API
+// ─── State ────────────────────────────────────────────────────────────────────
+const markers      = {};
+let   aircraft     = [];
 let   activeFilter = 'all';
 let   selectedHex  = null;
 let   refreshTimer = null;
-let   progressTimer= null;
+let   firstLoad    = true;
 
-// ─── Colour by altitude ──────────────────────────────────────────────────────
+// ─── Color by altitude ───────────────────────────────────────────────────────
 function altColor(ac) {
-  if (ac.on_ground) return '#888';
-  const alt = ac.alt_baro ?? ac.alt_geom ?? 0;
+  if (ac.on_ground || ac.ground === true || ac.alt_baro === 'ground') return '#888';
+  const alt = typeof ac.alt_baro === 'number' ? ac.alt_baro : (ac.alt_geom ?? 0);
   if (alt < 5000)  return '#f55';
   if (alt < 15000) return '#fa0';
   if (alt < 25000) return '#ff0';
@@ -152,128 +184,167 @@ function altColor(ac) {
   return '#4af';
 }
 
-// ─── SVG aircraft icon ───────────────────────────────────────────────────────
-function planeIcon(color, heading, isMil) {
-  const rot = heading ?? 0;
-  const body = isMil ? '#f80' : color;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
-    <g transform="rotate(${rot},14,14)">
-      <!-- fuselage -->
-      <ellipse cx="14" cy="14" rx="2.5" ry="8" fill="${body}" opacity="0.95"/>
-      <!-- wings -->
-      <polygon points="14,12 4,18 24,18" fill="${body}" opacity="0.85"/>
-      <!-- tail -->
-      <polygon points="14,20 9,24 19,24" fill="${body}" opacity="0.8"/>
-      <!-- nose dot -->
-      <circle cx="14" cy="6.5" r="2" fill="white" opacity="0.6"/>
+// ─── Plane SVG icon ──────────────────────────────────────────────────────────
+function planeIcon(color, heading, isMil, isGround) {
+  const rot  = isNaN(heading) ? 0 : heading;
+  const fill = isMil ? '#f80' : color;
+  const size = isGround ? 20 : 26;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 28 28">
+    <g transform="rotate(${rot},14,14)" opacity="${isGround ? 0.6 : 1}">
+      <ellipse cx="14" cy="14" rx="2.8" ry="8.5" fill="${fill}"/>
+      <polygon points="14,11 3,19 25,19" fill="${fill}" opacity="0.85"/>
+      <polygon points="14,21 8,26 20,26" fill="${fill}" opacity="0.75"/>
+      <circle cx="14" cy="6" r="2.2" fill="white" opacity="0.5"/>
     </g>
   </svg>`;
-  return L.divIcon({
-    html: svg,
-    className: '',
-    iconSize: [28, 28],
-    iconAnchor: [14, 14]
-  });
+  return L.divIcon({ html: svg, className: '', iconSize: [size,size], iconAnchor: [size/2,size/2] });
 }
 
-// ─── Fetch from adsb.fi ───────────────────────────────────────────────────────
+// ─── Fetch flights ────────────────────────────────────────────────────────────
 async function fetchFlights() {
-  const bounds = map.getBounds();
-  const lat  = ((bounds.getNorth() + bounds.getSouth()) / 2).toFixed(4);
-  const lon  = ((bounds.getEast()  + bounds.getWest())  / 2).toFixed(4);
-
-  // Radius from centre to corner in NM (1 deg ≈ 60 NM), capped at 250
+  const bounds  = map.getBounds();
+  const lat     = ((bounds.getNorth() + bounds.getSouth()) / 2).toFixed(4);
+  const lon     = ((bounds.getEast()  + bounds.getWest())  / 2).toFixed(4);
   const latDiff = (bounds.getNorth() - bounds.getSouth()) / 2;
   const lonDiff = (bounds.getEast()  - bounds.getWest())  / 2;
-  const dist    = Math.min(250, Math.ceil(Math.max(latDiff, lonDiff) * 70));
+  const dist    = Math.min(250, Math.ceil(Math.max(latDiff, lonDiff) * 75));
 
-  const url = `https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${dist}`;
+  // Multiple free APIs with CORS support — tries each in order
+  const endpoints = [
+    `https://api.airplanes.live/v2/point/${lat}/${lon}/${dist}`,
+    `https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${dist}`,
+    `https://api.adsb.one/v2/point/${lat}/${lon}/${dist}`,
+  ];
 
-  try {
-    const res  = await fetch(url);
-    const data = await res.json();
-    aircraft = (data.aircraft ?? data.ac ?? []).filter(ac => ac.lat && ac.lon);
-    updateStatus(`Updated ${new Date().toLocaleTimeString()}`, aircraft.length);
-    renderMarkers();
-  } catch (e) {
-    updateStatus('⚠ API error — retrying…', null);
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, { mode: 'cors', cache: 'no-store' });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const raw  = data.aircraft ?? data.ac ?? data.planes ?? [];
+      aircraft   = raw.filter(ac => ac.lat != null && ac.lon != null);
+      updateStatus(`Updated ${new Date().toLocaleTimeString()}`, aircraft.length);
+      renderMarkers();
+      if (firstLoad) { document.getElementById('loading').style.display = 'none'; firstLoad = false; }
+      return; // success — stop trying
+    } catch (_) { continue; }
+  }
+  // All failed
+  updateStatus('⚠ API error — retrying…', null);
+  if (firstLoad) {
+    document.querySelector('#loading p').textContent = '⚠ API error — retrying in 10s…';
   }
 }
 
 function updateStatus(msg, n) {
   document.getElementById('status').textContent = msg;
-  if (n !== null) document.getElementById('count').textContent = `${n} aircraft`;
+  if (n !== null) document.getElementById('count').textContent = `${n.toLocaleString()} aircraft`;
 }
 
 // ─── Render markers ──────────────────────────────────────────────────────────
 function renderMarkers() {
-  const visible = applyFilter(aircraft);
-  const visibleHex = new Set(visible.map(a => a.hex));
+  const visible    = applyFilter(aircraft);
+  const visibleSet = new Set(visible.map(a => a.hex));
 
-  // Remove stale
-  Object.keys(markers).forEach(hex => {
-    if (!visibleHex.has(hex)) { map.removeLayer(markers[hex]); delete markers[hex]; }
-  });
+  // Remove gone aircraft
+  for (const hex of Object.keys(markers)) {
+    if (!visibleSet.has(hex)) { map.removeLayer(markers[hex]); delete markers[hex]; }
+  }
 
-  visible.forEach(ac => {
-    const color   = altColor(ac);
-    const isMil   = ac.military === true || ac.mil === true;
-    const icon    = planeIcon(color, ac.track ?? ac.true_heading, isMil);
-    const tooltip = `<b>${ac.flight?.trim() || ac.hex}</b><br>
-      ${ac.t ?? ''} · ${ac.r ?? ''}<br>
-      Alt: ${ac.alt_baro ?? '—'} ft<br>
-      Spd: ${ac.gs ?? '—'} kts`;
+  for (const ac of visible) {
+    const isGround = ac.on_ground === true || ac.alt_baro === 'ground';
+    const isMil    = ac.military === true || ac.mil === true || ac.type === 'military';
+    const color    = altColor(ac);
+    const icon     = planeIcon(color, ac.track ?? ac.true_heading, isMil, isGround);
+
+    const tip = `<div style="font-family:'Courier New',monospace;font-size:11px;line-height:1.6">
+      <b style="color:#4af;font-size:13px">${(ac.flight ?? ac.callsign ?? ac.hex ?? '').trim() || ac.hex}</b><br>
+      ${[ac.desc, ac.t].filter(Boolean).join(' · ') || 'Unknown type'}<br>
+      <span style="color:#888">Alt:</span> ${typeof ac.alt_baro === 'number' ? ac.alt_baro.toLocaleString() + ' ft' : (isGround ? 'Ground' : '—')}<br>
+      <span style="color:#888">Spd:</span> ${ac.gs != null ? Math.round(ac.gs) + ' kts' : '—'}&nbsp;
+      <span style="color:#888">Hdg:</span> ${ac.track != null ? Math.round(ac.track) + '°' : '—'}
+    </div>`;
 
     if (markers[ac.hex]) {
-      markers[ac.hex].setLatLng([ac.lat, ac.lon]);
-      markers[ac.hex].setIcon(icon);
+      markers[ac.hex].setLatLng([ac.lat, ac.lon]).setIcon(icon);
+      markers[ac.hex]._adsbData = ac;
     } else {
-      const m = L.marker([ac.lat, ac.lon], { icon })
-        .bindTooltip(tooltip, { className: 'adsb-tip', direction: 'top', offset: [0,-10] })
+      const m = L.marker([ac.lat, ac.lon], { icon, zIndexOffset: isGround ? 0 : 100 })
+        .bindTooltip(tip, { className: 'adsb-tip', direction: 'top', offset: [0, -8] })
         .addTo(map);
       m.on('click', () => openPanel(ac.hex));
+      m._adsbData = ac;
       markers[ac.hex] = m;
     }
-  });
+  }
+
+  // Refresh panel if open
+  if (selectedHex && markers[selectedHex]) openPanel(selectedHex, false);
 }
 
-// ─── Filter logic ────────────────────────────────────────────────────────────
+// ─── Filter ───────────────────────────────────────────────────────────────────
 function applyFilter(list) {
   if (activeFilter === 'mil')    return list.filter(a => a.military || a.mil);
-  if (activeFilter === 'ground') return list.filter(a => a.on_ground);
+  if (activeFilter === 'ground') return list.filter(a => a.on_ground || a.alt_baro === 'ground');
   return list;
 }
 
 // ─── Detail panel ────────────────────────────────────────────────────────────
-function openPanel(hex) {
+function openPanel(hex, pan = true) {
   const ac = aircraft.find(a => a.hex === hex);
   if (!ac) return;
   selectedHex = hex;
 
-  document.getElementById('p-callsign').textContent = ac.flight?.trim() || ac.hex.toUpperCase();
+  const isGround = ac.on_ground || ac.alt_baro === 'ground';
+  const altText  = typeof ac.alt_baro === 'number'
+    ? `${ac.alt_baro.toLocaleString()} ft`
+    : (isGround ? 'On ground' : '—');
+
+  const vrText   = ac.baro_rate != null
+    ? `${ac.baro_rate > 0 ? '▲' : ac.baro_rate < 0 ? '▼' : '→'} ${Math.abs(ac.baro_rate).toLocaleString()} fpm`
+    : '—';
+
+  const vrClass  = ac.baro_rate > 100 ? 'ok' : ac.baro_rate < -100 ? 'warn' : '';
+
+  document.getElementById('p-callsign').textContent =
+    (ac.flight ?? ac.callsign ?? '').trim() || ac.hex?.toUpperCase() || '———';
   document.getElementById('p-type').textContent =
     [ac.desc, ac.t, ac.r].filter(Boolean).join(' · ') || 'Unknown type';
 
   const rows = [
-    ['ICAO Hex',    ac.hex?.toUpperCase()],
-    ['Registration',ac.r],
-    ['Type Code',   ac.t],
-    ['Altitude',    ac.alt_baro != null ? `${ac.alt_baro.toLocaleString()} ft` : (ac.on_ground ? 'On ground' : '—')],
-    ['Ground Speed',ac.gs != null ? `${Math.round(ac.gs)} kts` : '—'],
-    ['True Track',  ac.track != null ? `${Math.round(ac.track)}°` : '—'],
-    ['Vert. Rate',  ac.baro_rate != null ? `${ac.baro_rate > 0 ? '▲' : '▼'} ${Math.abs(ac.baro_rate)} fpm` : '—'],
-    ['Squawk',      ac.squawk || '—'],
-    ['Source',      ac.type || '—'],
-    ['Position',    ac.lat != null ? `${ac.lat.toFixed(4)}°, ${ac.lon.toFixed(4)}°` : '—'],
-    ['Military',    (ac.military || ac.mil) ? '⚠ YES' : 'No'],
+    ['ICAO Hex',     ac.hex?.toUpperCase(),                     ''],
+    ['Registration', ac.r,                                      ''],
+    ['Aircraft Type',ac.t,                                      ''],
+    ['Description',  ac.desc,                                   ''],
+    ['Operator',     ac.ownOp ?? ac.operator,                   ''],
+    ['Altitude',     altText,                                   ''],
+    ['Ground Speed', ac.gs != null ? `${Math.round(ac.gs)} kts` : '—', ''],
+    ['True Track',   ac.track != null ? `${Math.round(ac.track)}°` : '—', ''],
+    ['Vert. Rate',   vrText,                                    vrClass],
+    ['Squawk',       ac.squawk,                                 ac.squawk === '7700' ? 'warn' : ac.squawk === '7500' ? 'warn' : ''],
+    ['Emergency',    ac.emergency && ac.emergency !== 'none' ? '⚠ ' + ac.emergency.toUpperCase() : 'None', ac.emergency && ac.emergency !== 'none' ? 'warn' : ''],
+    ['Source',       ac.type,                                   ''],
+    ['Military',     (ac.military || ac.mil) ? '⚠ YES' : 'No', (ac.military || ac.mil) ? 'warn' : ''],
+    ['Position',     ac.lat != null ? `${ac.lat.toFixed(4)}°, ${ac.lon.toFixed(4)}°` : '—', ''],
   ];
 
-  document.getElementById('p-body').innerHTML = rows.map(([l,v]) =>
-    `<div class="info-row"><span class="label">${l}</span><span class="val">${v ?? '—'}</span></div>`
-  ).join('');
+  document.getElementById('p-body').innerHTML = rows
+    .filter(([,v]) => v != null && v !== '' && v !== '—' || v === '—')
+    .map(([l, v, cls]) =>
+      `<div class="info-row">
+        <span class="label">${l}</span>
+        <span class="val ${cls}">${v ?? '—'}</span>
+      </div>`
+    ).join('');
+
+  const call = (ac.flight ?? ac.callsign ?? '').trim();
+  const faLink = call
+    ? `https://flightaware.com/live/flight/${call}`
+    : `https://flightaware.com/live/modes/${ac.hex}/redirect`;
+  document.getElementById('p-map-link').href = faLink;
 
   document.getElementById('panel').classList.add('open');
-  if (ac.lat && ac.lon) map.panTo([ac.lat, ac.lon]);
+  if (pan && ac.lat && ac.lon) map.panTo([ac.lat, ac.lon]);
 }
 
 document.getElementById('closePanel').addEventListener('click', () => {
@@ -287,17 +358,24 @@ function doSearch() {
   if (!q) return;
   const found = aircraft.find(a =>
     (a.flight?.trim().toLowerCase() === q) ||
+    (a.callsign?.trim().toLowerCase() === q) ||
     (a.hex?.toLowerCase() === q) ||
     (a.r?.toLowerCase() === q)
   );
-  if (found) { openPanel(found.hex); }
-  else { updateStatus(`"${q}" not found in current view`, aircraft.length); }
+  if (found) {
+    openPanel(found.hex);
+    map.panTo([found.lat, found.lon]);
+  } else {
+    updateStatus(`"${q}" not found in current view`, aircraft.length);
+  }
 }
 
 document.getElementById('searchBtn').addEventListener('click', doSearch);
-document.getElementById('searchBox').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+document.getElementById('searchBox').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch();
+});
 
-// ─── Filters ─────────────────────────────────────────────────────────────────
+// ─── Filter buttons ──────────────────────────────────────────────────────────
 document.querySelectorAll('.filter-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
@@ -312,38 +390,48 @@ function startProgressBar() {
   const bar = document.getElementById('refreshProgress');
   bar.style.transition = 'none';
   bar.style.width = '0%';
-  requestAnimationFrame(() => {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
     bar.style.transition = `width ${REFRESH_MS}ms linear`;
     bar.style.width = '100%';
-  });
+  }));
 }
 
-// ─── Auto-refresh ────────────────────────────────────────────────────────────
+// ─── Auto-refresh ─────────────────────────────────────────────────────────────
 function scheduleRefresh() {
+  clearInterval(refreshTimer);
   fetchFlights();
   startProgressBar();
-  clearInterval(refreshTimer);
   refreshTimer = setInterval(() => { fetchFlights(); startProgressBar(); }, REFRESH_MS);
 }
 
 map.on('moveend', scheduleRefresh);
 
-// ─── Tooltip styling ─────────────────────────────────────────────────────────
+// ─── Tooltip style ────────────────────────────────────────────────────────────
 const style = document.createElement('style');
-style.textContent = `.adsb-tip {
-  background: rgba(8,14,30,0.95) !important;
-  border: 1px solid #1e3060 !important;
-  color: #c8d8ff !important;
-  font-family: 'Courier New', monospace;
-  font-size: 11px;
-  border-radius: 4px;
-  box-shadow: 0 2px 12px rgba(0,80,255,.2);
-}
-.adsb-tip::before { border-top-color: #1e3060 !important; }
+style.textContent = `
+  .adsb-tip {
+    background: rgba(6,10,22,0.97) !important;
+    border: 1px solid #1e3060 !important;
+    color: #c8d8ff !important;
+    font-family: 'Courier New', monospace !important;
+    font-size: 11px !important;
+    border-radius: 5px !important;
+    box-shadow: 0 4px 20px rgba(0,80,255,.25) !important;
+    padding: 8px 10px !important;
+  }
+  .leaflet-tooltip-top.adsb-tip::before {
+    border-top-color: #1e3060 !important;
+  }
+  .leaflet-control-zoom a {
+    background: rgba(8,14,30,0.9) !important;
+    color: #4af !important;
+    border-color: #1e3060 !important;
+  }
+  .leaflet-control-zoom a:hover { background: #1a2540 !important; }
 `;
 document.head.appendChild(style);
 
-// ─── Init ────────────────────────────────────────────────────────────────────
+// ─── Start ────────────────────────────────────────────────────────────────────
 scheduleRefresh();
 </script>
 </body>
