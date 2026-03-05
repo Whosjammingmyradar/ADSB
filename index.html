@@ -153,10 +153,25 @@ function buildGeo(){
     geometry:{type:'Point',coordinates:[a.lon,a.lat]},
     properties:{
       hex:a.hex,color:hexC(getAlt(a)),rotation:a.track??0,
-      opacity:onGround(a)?0.3:(selHex===a.hex?1.0:0.72),
+      opacity:onGround(a)?0.35:(selHex===a.hex?1.0:0.82),
       alt:getAlt(a)??0,ground:onGround(a)?1:0,
     }
   }));
+
+  // Heading ticks — short line in direction of travel
+  const tickF=[];
+  for(const a of vis){
+    if(onGround(a)||!a.track)continue;
+    const rad=(a.track)*Math.PI/180;
+    const len=0.018; // degrees — short tick
+    const lon2=a.lon+Math.sin(rad)*len;
+    const lat2=a.lat+Math.cos(rad)*len;
+    tickF.push({type:'Feature',
+      geometry:{type:'LineString',coordinates:[[a.lon,a.lat],[lon2,lat2]]},
+      properties:{color:hexC(getAlt(a))}
+    });
+  }
+
   const trF=[];
   for(const a of vis){
     const t=trails[a.hex]||[];
@@ -168,21 +183,12 @@ function buildGeo(){
       });
     }
   }
-  return{acF,trF};
+  return{acF,tickF,trF};
 }
 
 // ── LAYERS ───────────────────────────────────────────────────
 mlmap.on('load',()=>{
   log('Map loaded ✓');
-  const S=64,cv=document.createElement('canvas');
-  cv.width=cv.height=S;
-  const cx=cv.getContext('2d'),mx=S/2,my=S/2,W=11,H=19;
-  cx.fillStyle='#fff';
-  cx.beginPath();
-  cx.moveTo(mx,my-H);cx.lineTo(mx+W,my+H*.5);cx.lineTo(mx+W*.3,my+H*.05);
-  cx.lineTo(mx,my+H*.7);cx.lineTo(mx-W*.3,my+H*.05);cx.lineTo(mx-W,my+H*.5);
-  cx.closePath();cx.fill();
-  mlmap.addImage('arrow',cv,{sdf:true});
 
   mlmap.addSource('tr',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
   mlmap.addLayer({id:'trails',type:'line',source:'tr',
@@ -190,22 +196,41 @@ mlmap.on('load',()=>{
     layout:{'line-cap':'round','line-join':'round'}});
 
   mlmap.addSource('ac',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
-  mlmap.addLayer({id:'ac-gnd',type:'circle',source:'ac',filter:['==',['get','ground'],1],
-    paint:{'circle-radius':3,'circle-color':['get','color'],'circle-opacity':0.35}});
-  mlmap.addLayer({id:'ac-air',type:'symbol',source:'ac',filter:['==',['get','ground'],0],
-    layout:{
-      'icon-image':'arrow',
-      'icon-size':['interpolate',['linear'],['get','alt'],0,0.20,10000,0.24,25000,0.28,40000,0.32],
-      'icon-rotate':['get','rotation'],'icon-rotation-alignment':'map',
-      'icon-allow-overlap':true,'icon-ignore-placement':true,
-    },
-    paint:{'icon-color':['get','color'],'icon-opacity':['get','opacity']}
+
+  // Outer glow ring
+  mlmap.addLayer({id:'ac-glow',type:'circle',source:'ac',
+    filter:['==',['get','ground'],0],
+    paint:{
+      'circle-radius':['interpolate',['linear'],['get','alt'],0,8,15000,12,35000,16,50000,18],
+      'circle-color':['get','color'],
+      'circle-opacity':0.12,
+      'circle-blur':1,
+    }
   });
 
-  mlmap.on('click','ac-air',e=>{if(e.features[0])openPanel(e.features[0].properties.hex)});
-  mlmap.on('click','ac-gnd',e=>{if(e.features[0])openPanel(e.features[0].properties.hex)});
-  mlmap.on('mouseenter','ac-air',()=>mlmap.getCanvas().style.cursor='pointer');
-  mlmap.on('mouseleave','ac-air',()=>mlmap.getCanvas().style.cursor='');
+  // Main dot
+  mlmap.addLayer({id:'ac-dot',type:'circle',source:'ac',
+    paint:{
+      'circle-radius':['case',['==',['get','ground'],1],3,
+        ['interpolate',['linear'],['get','alt'],0,4,15000,5,35000,6,50000,7]],
+      'circle-color':['get','color'],
+      'circle-opacity':['get','opacity'],
+      'circle-stroke-width':0.5,
+      'circle-stroke-color':'rgba(0,0,0,0.4)',
+    }
+  });
+
+  // Heading tick — thin line showing direction
+  // We draw this as a very short line using a separate layer on a separate source
+  mlmap.addSource('ticks',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+  mlmap.addLayer({id:'ac-tick',type:'line',source:'ticks',
+    paint:{'line-color':['get','color'],'line-width':1.5,'line-opacity':0.8},
+    layout:{'line-cap':'round'}
+  });
+
+  mlmap.on('click','ac-dot',e=>{if(e.features[0])openPanel(e.features[0].properties.hex)});
+  mlmap.on('mouseenter','ac-dot',()=>mlmap.getCanvas().style.cursor='pointer');
+  mlmap.on('mouseleave','ac-dot',()=>mlmap.getCanvas().style.cursor='');
 
   ready=true;
   log('Layers ready ✓ — fetching aircraft…');
@@ -216,8 +241,9 @@ mlmap.on('load',()=>{
 
 function render(){
   if(!ready)return;
-  const{acF,trF}=buildGeo();
+  const{acF,tickF,trF}=buildGeo();
   mlmap.getSource('ac')?.setData({type:'FeatureCollection',features:acF});
+  mlmap.getSource('ticks')?.setData({type:'FeatureCollection',features:tickF});
   mlmap.getSource('tr')?.setData({type:'FeatureCollection',features:trF});
 }
 
