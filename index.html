@@ -65,6 +65,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#09090f}
   <button class="btn" data-f="mil">MIL</button>
   <button class="btn" data-f="hi">HIGH</button>
   <button class="btn" onclick="toggleDbg()">DBG</button>
+  <button class="btn on" onclick="if(ready){fetchAircraft();}else{log('map not ready yet','#f80');}">↺ RETRY</button>
   <span id="ct">—</span>
 </div>
 <div id="dbg"></div>
@@ -275,8 +276,11 @@ mlmap.on('load', ()=>{
   mlmap.on('mouseleave','ac-air', ()=>mlmap.getCanvas().style.cursor='');
 
   ready=true;
-  log('Layers ready — fetching aircraft…');
-  go();
+  log('Layers ready — starting fetch NOW');
+  // Call directly, not through go(), to avoid any timing issue
+  fetchAircraft();
+  startBar();
+  timer = setInterval(()=>{fetchAircraft();startBar();}, REFRESH);
 });
 
 function render(){
@@ -407,12 +411,7 @@ function startBar(){
     p.style.transition=`width ${REFRESH}ms linear`; p.style.width='100%';
   }));
 }
-function go(){
-  clearInterval(timer);
-  fetchAircraft(); startBar();
-  timer=setInterval(()=>{fetchAircraft();startBar();}, REFRESH);
-}
-mlmap.on('moveend', ()=>{ if(ready) go(); });
+mlmap.on('moveend', ()=>{ if(ready){ clearInterval(timer); fetchAircraft(); startBar(); timer=setInterval(()=>{fetchAircraft();startBar();},REFRESH); } });
 </script>
 </body>
 </html>
