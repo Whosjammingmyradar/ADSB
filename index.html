@@ -59,7 +59,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#09090f}
   <button class="btn" data-f="mil">MIL</button>
   <button class="btn" data-f="hi">HIGH</button>
   <button class="btn" onclick="toggleDbg()">DBG</button>
-  <button class="btn on" onclick="manualFetch()">↺ RETRY</button>
+  <button class="btn on" onclick="fetchAircraft()">↺</button>
   <span id="ct">—</span>
 </div>
 <div id="dbg"></div>
@@ -69,11 +69,11 @@ html,body{width:100%;height:100%;overflow:hidden;background:#09090f}
 </div>
 <div id="leg">
   <h4>ALTITUDE</h4>
-  <div class="lr"><div class="lc" style="background:#c44"></div>&lt;5k ft</div>
-  <div class="lr"><div class="lc" style="background:#c80"></div>5–15k</div>
-  <div class="lr"><div class="lc" style="background:#990"></div>15–25k</div>
-  <div class="lr"><div class="lc" style="background:#0a0"></div>25–35k</div>
-  <div class="lr"><div class="lc" style="background:#28a"></div>&gt;35k ft</div>
+  <div class="lr"><div class="lc" style="background:#be3232"></div>&lt;5k ft</div>
+  <div class="lr"><div class="lc" style="background:#be6900"></div>5–15k</div>
+  <div class="lr"><div class="lc" style="background:#909000"></div>15–25k</div>
+  <div class="lr"><div class="lc" style="background:#008200"></div>25–35k</div>
+  <div class="lr"><div class="lc" style="background:#1e78af"></div>&gt;35k ft</div>
 </div>
 <div id="sb">
   <div>airborne <span id="sa">—</span></div>
@@ -84,33 +84,81 @@ html,body{width:100%;height:100%;overflow:hidden;background:#09090f}
 <div id="bar"><div id="prg"></div></div>
 
 <script>
-// ── DEBUG ────────────────────────────────────────────────────
-const dbgEl = document.getElementById('dbg');
-function log(msg, col) {
-  const d = document.createElement('div');
-  d.style.color = col||'#0f0';
-  d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-  dbgEl.appendChild(d);
-  dbgEl.scrollTop = dbgEl.scrollHeight;
-}
-function toggleDbg(){ dbgEl.classList.toggle('show'); }
+const dbgEl=document.getElementById('dbg');
+function log(m,c){const d=document.createElement('div');d.style.color=c||'#0f0';d.textContent=`[${new Date().toLocaleTimeString()}] ${m}`;dbgEl.appendChild(d);dbgEl.scrollTop=dbgEl.scrollHeight;}
+function toggleDbg(){dbgEl.classList.toggle('show');}
 
-// ── MAP: use OpenFreeMap — free, no token, CORS-safe ────────
-// OpenFreeMap is specifically designed for open apps, no token needed
-log('Starting…');
+// ── MAP: inline style — only raster tiles + our data layers, nothing on top ──
 const mlmap = new maplibregl.Map({
   container: 'map',
-  style: 'https://tiles.openfreemap.org/styles/dark',
-  center: [-118, 34],
-  zoom: 7,
-  pitch: 45,
+  style: {
+    version: 8,
+    glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+    sources: {
+      // Carto dark matter — proven CORS-open tiles
+      carto: {
+        type: 'raster',
+        tiles: [
+          'https://a.basemaps.cartocdn.com/dark_matter/{z}/{x}/{y}@2x.png',
+          'https://b.basemaps.cartocdn.com/dark_matter/{z}/{x}/{y}@2x.png',
+          'https://c.basemaps.cartocdn.com/dark_matter/{z}/{x}/{y}@2x.png',
+        ],
+        tileSize: 256,
+        maxzoom: 18,
+      },
+      // Our aircraft data — start empty
+      ac:    {type:'geojson', data:{type:'FeatureCollection',features:[]}},
+      ticks: {type:'geojson', data:{type:'FeatureCollection',features:[]}},
+      tr:    {type:'geojson', data:{type:'FeatureCollection',features:[]}},
+    },
+    layers: [
+      // 1. Black background
+      {id:'bg', type:'background', paint:{'background-color':'#09090f'}},
+      // 2. Dark map tiles
+      {id:'carto', type:'raster', source:'carto'},
+      // 3. Trail lines — below aircraft
+      {id:'trails', type:'line', source:'tr',
+        paint:{'line-color':['get','color'],'line-opacity':['get','op'],'line-width':['get','w']},
+        layout:{'line-cap':'round','line-join':'round'}},
+      // 4. Heading ticks
+      {id:'ticks', type:'line', source:'ticks',
+        paint:{'line-color':['get','color'],'line-width':1.5,'line-opacity':0.85},
+        layout:{'line-cap':'round'}},
+      // 5. Glow halo (blurred, behind dot)
+      {id:'ac-glow', type:'circle', source:'ac',
+        filter:['==',['get','ground'],0],
+        paint:{
+          'circle-radius':['interpolate',['linear'],['zoom'],3,10,6,16,10,22],
+          'circle-color':['get','color'],
+          'circle-opacity':0.25,
+          'circle-blur':0.8,
+        }},
+      // 6. Main dot — ON TOP of everything including map labels
+      {id:'ac-dot', type:'circle', source:'ac',
+        paint:{
+          'circle-radius':['interpolate',['linear'],['zoom'],3,3,6,5,10,7,14,10],
+          'circle-color':['get','color'],
+          'circle-opacity':1,
+          'circle-stroke-width':1.5,
+          'circle-stroke-color':'#ffffff',
+          'circle-stroke-opacity':0.5,
+        }},
+    ],
+  },
+  center: [-95, 37],
+  zoom: 4,
+  pitch: 50,
   bearing: -12,
   antialias: true,
   attributionControl: false,
 });
 
-mlmap.addControl(new maplibregl.NavigationControl({visualizePitch:true}), 'bottom-right');
-mlmap.on('error', e => log('Map err: '+(e.error?.message||e.sourceId||'?'), '#f80'));
+mlmap.addControl(new maplibregl.NavigationControl({visualizePitch:true}),'bottom-right');
+mlmap.on('error',e=>log('MapErr: '+(e.error?.message||e.sourceId||'?'),'#f80'));
+
+mlmap.on('click','ac-dot',e=>{if(e.features[0])openPanel(e.features[0].properties.hex)});
+mlmap.on('mouseenter','ac-dot',()=>mlmap.getCanvas().style.cursor='pointer');
+mlmap.on('mouseleave','ac-dot',()=>mlmap.getCanvas().style.cursor='');
 
 // ── STATE ────────────────────────────────────────────────────
 const REFRESH=10000;
@@ -123,7 +171,7 @@ const getAlt=a=>typeof a.alt_baro==='number'?a.alt_baro:typeof a.alt_geom==='num
 
 function altRgb(alt){
   if(alt==null)return[80,80,80];
-  const s=[[0,[190,50,50]],[5000,[190,105,0]],[15000,[155,145,0]],[25000,[0,130,60]],[35000,[30,120,175]],[50000,[80,155,195]]];
+  const s=[[0,[190,50,50]],[5000,[190,105,0]],[15000,[144,144,0]],[25000,[0,130,60]],[35000,[30,120,175]],[50000,[80,155,195]]];
   for(let i=1;i<s.length;i++){
     if(alt<=s[i][0]){const t=(alt-s[i-1][0])/(s[i][0]-s[i-1][0]);return s[i-1][1].map((v,j)=>Math.round(v+t*(s[i][1][j]-v)));}
   }
@@ -148,30 +196,20 @@ function updateTrails(){
 
 function buildGeo(){
   const vis=getVis();
-  const acF=vis.map(a=>({
-    type:'Feature',
+  const acF=vis.map(a=>({type:'Feature',
     geometry:{type:'Point',coordinates:[a.lon,a.lat]},
-    properties:{
-      hex:a.hex,color:hexC(getAlt(a)),rotation:a.track??0,
-      opacity:onGround(a)?0.35:(selHex===a.hex?1.0:0.82),
-      alt:getAlt(a)??0,ground:onGround(a)?1:0,
-    }
+    properties:{hex:a.hex,color:hexC(getAlt(a)),rotation:a.track??0,
+      alt:getAlt(a)??0,ground:onGround(a)?1:0}
   }));
-
-  // Heading ticks — short line in direction of travel
   const tickF=[];
   for(const a of vis){
     if(onGround(a)||!a.track)continue;
-    const rad=(a.track)*Math.PI/180;
-    const len=0.018; // degrees — short tick
-    const lon2=a.lon+Math.sin(rad)*len;
-    const lat2=a.lat+Math.cos(rad)*len;
+    const rad=a.track*Math.PI/180,len=0.025;
     tickF.push({type:'Feature',
-      geometry:{type:'LineString',coordinates:[[a.lon,a.lat],[lon2,lat2]]},
+      geometry:{type:'LineString',coordinates:[[a.lon,a.lat],[a.lon+Math.sin(rad)*len,a.lat+Math.cos(rad)*len]]},
       properties:{color:hexC(getAlt(a))}
     });
   }
-
   const trF=[];
   for(const a of vis){
     const t=trails[a.hex]||[];
@@ -179,112 +217,55 @@ function buildGeo(){
       const p=i/t.length;
       trF.push({type:'Feature',
         geometry:{type:'LineString',coordinates:[[t[i-1].lng,t[i-1].lat],[t[i].lng,t[i].lat]]},
-        properties:{color:hexC(t[i].alt),op:p*(selHex===a.hex?0.7:0.4),w:p*(selHex===a.hex?2:1.2)}
+        properties:{color:hexC(t[i].alt),op:p*(selHex===a.hex?0.65:0.38),w:p*(selHex===a.hex?2:1.2)}
       });
     }
   }
   return{acF,tickF,trF};
 }
 
-// ── LAYERS ───────────────────────────────────────────────────
-mlmap.on('load',()=>{
-  log('Map loaded ✓');
-
-  mlmap.addSource('tr',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
-  mlmap.addLayer({id:'trails',type:'line',source:'tr',
-    paint:{'line-color':['get','color'],'line-opacity':['get','op'],'line-width':['get','w']},
-    layout:{'line-cap':'round','line-join':'round'}});
-
-  mlmap.addSource('ac',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
-
-  // Outer glow ring
-  mlmap.addLayer({id:'ac-glow',type:'circle',source:'ac',
-    filter:['==',['get','ground'],0],
-    paint:{
-      'circle-radius':['interpolate',['linear'],['zoom'],4,14,8,20,12,28],
-      'circle-color':['get','color'],
-      'circle-opacity':0.18,
-      'circle-blur':0.6,
-    }
-  });
-
-  // Main dot — large and bright
-  mlmap.addLayer({id:'ac-dot',type:'circle',source:'ac',
-    paint:{
-      'circle-radius':['interpolate',['linear'],['zoom'],4,5,8,8,12,12],
-      'circle-color':['get','color'],
-      'circle-opacity':1.0,
-      'circle-stroke-width':1,
-      'circle-stroke-color':'rgba(255,255,255,0.3)',
-    }
-  });
-
-  // Heading tick — thin line showing direction
-  // We draw this as a very short line using a separate layer on a separate source
-  mlmap.addSource('ticks',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
-  mlmap.addLayer({id:'ac-tick',type:'line',source:'ticks',
-    paint:{'line-color':['get','color'],'line-width':1.5,'line-opacity':0.8},
-    layout:{'line-cap':'round'}
-  });
-
-  mlmap.on('click','ac-dot',e=>{if(e.features[0])openPanel(e.features[0].properties.hex)});
-  mlmap.on('mouseenter','ac-dot',()=>mlmap.getCanvas().style.cursor='pointer');
-  mlmap.on('mouseleave','ac-dot',()=>mlmap.getCanvas().style.cursor='');
-
-  ready=true;
-  log('Layers ready ✓ — fetching aircraft…');
-  fetchAircraft();
-  startBar();
-  timer=setInterval(()=>{fetchAircraft();startBar();},REFRESH);
-});
-
 function render(){
-  if(!ready)return;
   const{acF,tickF,trF}=buildGeo();
   mlmap.getSource('ac')?.setData({type:'FeatureCollection',features:acF});
   mlmap.getSource('ticks')?.setData({type:'FeatureCollection',features:tickF});
   mlmap.getSource('tr')?.setData({type:'FeatureCollection',features:trF});
 }
 
-// ── FETCH ─────────────────────────────────────────────────────
-// airplanes.live returns 0 because it needs the radius in NM not KM
-// Use correct units: adsb.lol/airplanes.live expect NM
+// ── MAP READY ────────────────────────────────────────────────
+mlmap.on('load',()=>{
+  ready=true;
+  log('Map loaded ✓ — fetching…');
+  document.getElementById('st').textContent='map ready';
+  fetchAircraft();
+  startBar();
+  timer=setInterval(()=>{fetchAircraft();startBar();},REFRESH);
+});
+
+// ── FETCH ────────────────────────────────────────────────────
 async function fetchAircraft(){
   const c=mlmap.getCenter();
   const lat=c.lat.toFixed(3),lon=c.lng.toFixed(3);
   const zoom=mlmap.getZoom();
-  // radius in nautical miles
   const nm=zoom<5?250:zoom<7?200:zoom<9?120:60;
-
-  log(`Fetching lat=${lat} lon=${lon} r=${nm}nm…`,'#888');
-
+  log(`Fetching ${lat},${lon} r=${nm}nm`,'#888');
   const attempts=[
-    // airplanes.live — correct NM radius
     [`https://api.airplanes.live/v2/point/${lat}/${lon}/${nm}`,'airplanes.live'],
-    // adsb.lol
-    [`https://api.adsb.lol/v2/point/${lat}/${lon}/${nm}`,'adsb.lol'],
-    // adsb.fi — uses NM too
-    [`https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${nm}`,'adsb.fi'],
-    // adsb.one
     [`https://api.adsb.one/v2/point/${lat}/${lon}/${nm}`,'adsb.one'],
-    // corsproxy wrapping airplanes.live
+    [`https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${nm}`,'adsb.fi'],
+    [`https://api.adsb.lol/v2/point/${lat}/${lon}/${nm}`,'adsb.lol'],
     [`https://corsproxy.io/?url=${encodeURIComponent(`https://api.airplanes.live/v2/point/${lat}/${lon}/${nm}`)}`,'corsproxy'],
-    // allorigins wrapping airplanes.live
     [`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.airplanes.live/v2/point/${lat}/${lon}/${nm}`)}`,'allorigins'],
   ];
-
   for(const[url,label]of attempts){
     try{
       const r=await fetch(url,{mode:'cors',cache:'no-store',signal:AbortSignal.timeout(9000)});
       if(!r.ok){log(`${label}: HTTP ${r.status}`,'#f80');continue;}
       const d=await r.json();
       const list=d.aircraft??d.ac??d.planes??d.data??[];
-      if(!Array.isArray(list)){log(`${label}: bad format`,'#f80');continue;}
+      if(!Array.isArray(list)||list.length===0){log(`${label}: ${list.length??'bad'} results`,'#f80');continue;}
       aircraft=list.filter(a=>a.lat!=null&&a.lon!=null);
-      if(aircraft.length===0){log(`${label}: 0 aircraft — trying next`,'#f80');continue;}
       updateTrails();render();
-      const ab=aircraft.filter(a=>!onGround(a)).length;
-      document.getElementById('sa').textContent=ab.toLocaleString();
+      document.getElementById('sa').textContent=aircraft.filter(a=>!onGround(a)).length.toLocaleString();
       document.getElementById('sg').textContent=aircraft.filter(onGround).length.toLocaleString();
       document.getElementById('sm').textContent=aircraft.filter(isMil).length.toLocaleString();
       const alts=aircraft.map(getAlt).filter(Boolean);
@@ -299,9 +280,7 @@ async function fetchAircraft(){
   document.getElementById('st').textContent='⚠ all APIs failed';
 }
 
-function manualFetch(){fetchAircraft();}
-
-// ── PANEL ─────────────────────────────────────────────────────
+// ── PANEL ────────────────────────────────────────────────────
 function openPanel(hex,pan=true){
   const a=aircraft.find(x=>x.hex===hex);if(!a)return;
   selHex=hex;
@@ -347,15 +326,12 @@ document.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{
 function startBar(){
   const p=document.getElementById('prg');
   p.style.transition='none';p.style.width='0%';
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{
-    p.style.transition=`width ${REFRESH}ms linear`;p.style.width='100%';
-  }));
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{p.style.transition=`width ${REFRESH}ms linear`;p.style.width='100%'}));
 }
 
 mlmap.on('moveend',()=>{
   if(!ready)return;
-  clearInterval(timer);
-  fetchAircraft();startBar();
+  clearInterval(timer);fetchAircraft();startBar();
   timer=setInterval(()=>{fetchAircraft();startBar();},REFRESH);
 });
 </script>
