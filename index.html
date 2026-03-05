@@ -174,21 +174,23 @@ function buildGeoJSON(){
 }
 
 mlmap.on('load',()=>{
-  // Arrow sprite
-  const sz=32,cv=document.createElement('canvas');
+  // Arrow as SDF so icon-color works
+  const sz=64,cv=document.createElement('canvas');
   cv.width=cv.height=sz;
   const cx=cv.getContext('2d');
-  const mx=sz/2,my=sz/2,aw=6,ah=10;
+  const mx=sz/2,my=sz/2,aw=11,ah=18;
   cx.fillStyle='#ffffff';
   cx.beginPath();
-  cx.moveTo(mx,my-ah);
-  cx.lineTo(mx+aw,my+ah*.55);
-  cx.lineTo(mx+aw*.3,my+ah*.1);
-  cx.lineTo(mx,my+ah*.7);
-  cx.lineTo(mx-aw*.3,my+ah*.1);
-  cx.lineTo(mx-aw,my+ah*.55);
-  cx.closePath();cx.fill();
-  mlmap.addImage('arrow',cv);
+  cx.moveTo(mx,       my-ah);
+  cx.lineTo(mx+aw,    my+ah*.55);
+  cx.lineTo(mx+aw*.3, my+ah*.1);
+  cx.lineTo(mx,       my+ah*.7);
+  cx.lineTo(mx-aw*.3, my+ah*.1);
+  cx.lineTo(mx-aw,    my+ah*.55);
+  cx.closePath();
+  cx.fill();
+  // addImage with sdf:true enables icon-color tinting
+  mlmap.addImage('arrow', cv, {sdf: true});
 
   mlmap.addSource('tr',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
   mlmap.addLayer({id:'trails',type:'line',source:'tr',
@@ -196,12 +198,23 @@ mlmap.on('load',()=>{
     layout:{'line-cap':'round','line-join':'round'}});
 
   mlmap.addSource('ac',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+  // Ground: colored circles
   mlmap.addLayer({id:'ac-g',type:'circle',source:'ac',filter:['==','ground',true],
-    paint:{'circle-radius':2,'circle-color':['get','color'],'circle-opacity':['get','opacity']}});
+    paint:{'circle-radius':3,'circle-color':['get','color'],'circle-opacity':0.4}});
+  // Airborne: SDF arrow icons with altitude color
   mlmap.addLayer({id:'ac-a',type:'symbol',source:'ac',filter:['==','ground',false],
-    layout:{'icon-image':'arrow','icon-size':['get','sz'],'icon-rotate':['get','rotation'],
-      'icon-rotation-alignment':'map','icon-allow-overlap':true,'icon-ignore-placement':true},
-    paint:{'icon-color':['get','color'],'icon-opacity':['get','opacity']}});
+    layout:{
+      'icon-image':'arrow',
+      'icon-size':['interpolate',['linear'],['get','alt'], 0,0.18, 15000,0.22, 35000,0.28, 50000,0.32],
+      'icon-rotate':['get','rotation'],
+      'icon-rotation-alignment':'map',
+      'icon-allow-overlap':true,
+      'icon-ignore-placement':true,
+    },
+    paint:{
+      'icon-color':['get','color'],
+      'icon-opacity':['get','opacity'],
+    }});
 
   mlmap.on('click','ac-a',e=>{if(e.features[0])openPanel(e.features[0].properties.hex)});
   mlmap.on('click','ac-g',e=>{if(e.features[0])openPanel(e.features[0].properties.hex)});
@@ -223,36 +236,42 @@ function render(){
 async function fetchAircraft(){
   const c=mlmap.getCenter();
   const lat=c.lat.toFixed(2),lon=c.lng.toFixed(2);
-  const dist=Math.min(250,Math.max(50,Math.round(35000/Math.pow(2,mlmap.getZoom())*3)));
+  // At low zoom fetch large radius; at high zoom fetch smaller area
+  const zoom=mlmap.getZoom();
+  const dist=zoom<5?250:zoom<7?180:zoom<9?100:60;
+
+  // Try endpoints in order — first success wins
+  const base=`lat/${lat}/lon/${lon}/dist/${dist}`;
   const eps=[
     `https://api.airplanes.live/v2/point/${lat}/${lon}/${dist}`,
-    `https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${dist}`,
+    `https://opendata.adsb.fi/api/v3/${base}`,
     `https://api.adsb.one/v2/point/${lat}/${lon}/${dist}`,
-    `https://corsproxy.io/?url=${encodeURIComponent(`https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${dist}`)}`,
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${dist}`)}`,
+    `https://corsproxy.io/?url=${encodeURIComponent('https://opendata.adsb.fi/api/v3/'+base)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent('https://opendata.adsb.fi/api/v3/'+base)}`,
   ];
+
+  let lastErr='';
   for(const url of eps){
     try{
-      const r=await fetch(url,{mode:'cors',cache:'no-store',signal:AbortSignal.timeout(8000)});
-      if(!r.ok)continue;
+      document.getElementById('st').textContent=`trying ${new URL(url).hostname.split('.')[0]}…`;
+      const r=await fetch(url,{mode:'cors',cache:'no-store',signal:AbortSignal.timeout(9000)});
+      if(!r.ok){lastErr=`HTTP ${r.status}`;continue;}
       const d=await r.json();
-      aircraft=(d.aircraft??d.ac??d.planes??[]).filter(a=>a.lat!=null&&a.lon!=null);
+      const raw=d.aircraft??d.ac??d.planes??[];
+      aircraft=raw.filter(a=>a.lat!=null&&a.lon!=null);
       updateTrails();render();
-      const sa=aircraft.filter(a=>!onGround(a)).length;
-      const sg=aircraft.filter(onGround).length;
-      const sm=aircraft.filter(isMil).length;
+      document.getElementById('sa').textContent=aircraft.filter(a=>!onGround(a)).length.toLocaleString();
+      document.getElementById('sg').textContent=aircraft.filter(onGround).length.toLocaleString();
+      document.getElementById('sm').textContent=aircraft.filter(isMil).length.toLocaleString();
       const alts=aircraft.map(getAlt).filter(Boolean);
-      document.getElementById('sa').textContent=sa.toLocaleString();
-      document.getElementById('sg').textContent=sg.toLocaleString();
-      document.getElementById('sm').textContent=sm.toLocaleString();
       document.getElementById('st2').textContent=alts.length?Math.max(...alts).toLocaleString()+' ft':'—';
       const src=url.includes('corsproxy')?'proxy':url.includes('allorigins')?'proxy2':new URL(url).hostname.replace('opendata.','').split('.')[0];
       document.getElementById('st').textContent=`${new Date().toLocaleTimeString()} · ${src}`;
       document.getElementById('ct').textContent=`${aircraft.length.toLocaleString()} aircraft`;
       return;
-    }catch(_){}
+    }catch(e){lastErr=e.message;continue;}
   }
-  document.getElementById('st').textContent='⚠ retrying…';
+  document.getElementById('st').textContent=`⚠ all APIs failed: ${lastErr}`;
 }
 
 function openPanel(hex,pan=true){
