@@ -129,7 +129,8 @@ function updateTrails(){
   for(const a of aircraft){
     if(!trails[a.hex])trails[a.hex]=[];
     const t=trails[a.hex],last=t[t.length-1];
-    if(!last||Math.hypot(a.lat-last.lat,a.lon-last.lng)>0.001){
+    // Record every new position — no distance threshold
+    if(!last||last.lng!==a.lon||last.lat!==a.lat){
       t.push({lng:a.lon,lat:a.lat,alt:getAlt(a)});
       if(t.length>MAX_TRAIL)t.shift();
     }
@@ -142,23 +143,40 @@ function buildGeo(){
     geometry:{type:'Point',coordinates:[a.lon,a.lat]},
     properties:{hex:a.hex,color:hexC(getAlt(a)),alt:getAlt(a)??0,ground:onGround(a)?1:0}
   }));
+
+  // Heading tick — points FORWARD from dot (direction of travel)
   const tickF=[];
   for(const a of vis){
     if(onGround(a)||!a.track)continue;
-    const rad=a.track*Math.PI/180,len=0.08;
+    const rad=a.track*Math.PI/180,len=0.06;
     tickF.push({type:'Feature',
-      geometry:{type:'LineString',coordinates:[[a.lon,a.lat],[a.lon+Math.sin(rad)*len,a.lat+Math.cos(rad)*len]]},
+      geometry:{type:'LineString',coordinates:[
+        [a.lon,a.lat],
+        [a.lon+Math.sin(rad)*len, a.lat+Math.cos(rad)*len]
+      ]},
       properties:{color:hexC(getAlt(a))}
     });
   }
+
+  // Trail — one continuous line per aircraft, oldest→newest (ends at dot)
+  // Rendered as fading segments from tail (dim) to head (bright)
   const trF=[];
   for(const a of vis){
     const t=trails[a.hex]||[];
+    if(t.length<2)continue;
+    // Draw as individual segments so we can fade opacity old→new
     for(let i=1;i<t.length;i++){
-      const p=i/t.length;
+      const p=i/(t.length-1); // 0=oldest/dim, 1=newest/bright
       trF.push({type:'Feature',
-        geometry:{type:'LineString',coordinates:[[t[i-1].lng,t[i-1].lat],[t[i].lng,t[i].lat]]},
-        properties:{color:hexC(t[i].alt),op:p*(selHex===a.hex?0.85:0.55),w:p*(selHex===a.hex?2.5:1.6)}
+        geometry:{type:'LineString',coordinates:[
+          [t[i-1].lng,t[i-1].lat],
+          [t[i].lng,  t[i].lat  ]
+        ]},
+        properties:{
+          color: hexC(t[i].alt),
+          op: p*(selHex===a.hex?0.9:0.6),
+          w:  p*(selHex===a.hex?2.5:1.5)+0.5,
+        }
       });
     }
   }
