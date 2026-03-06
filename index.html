@@ -88,63 +88,10 @@ const dbgEl=document.getElementById('dbg');
 function log(m,c){const d=document.createElement('div');d.style.color=c||'#0f0';d.textContent=`[${new Date().toLocaleTimeString()}] ${m}`;dbgEl.appendChild(d);dbgEl.scrollTop=dbgEl.scrollHeight;}
 function toggleDbg(){dbgEl.classList.toggle('show');}
 
-// ── MAP: inline style — only raster tiles + our data layers, nothing on top ──
+// ── MAP: OpenFreeMap dark style — free, no token, great CORS ─
 const mlmap = new maplibregl.Map({
   container: 'map',
-  style: {
-    version: 8,
-    glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
-    sources: {
-      // Carto dark matter — proven CORS-open tiles
-      carto: {
-        type: 'raster',
-        tiles: [
-          'https://a.basemaps.cartocdn.com/dark_matter/{z}/{x}/{y}@2x.png',
-          'https://b.basemaps.cartocdn.com/dark_matter/{z}/{x}/{y}@2x.png',
-          'https://c.basemaps.cartocdn.com/dark_matter/{z}/{x}/{y}@2x.png',
-        ],
-        tileSize: 256,
-        maxzoom: 18,
-      },
-      // Our aircraft data — start empty
-      ac:    {type:'geojson', data:{type:'FeatureCollection',features:[]}},
-      ticks: {type:'geojson', data:{type:'FeatureCollection',features:[]}},
-      tr:    {type:'geojson', data:{type:'FeatureCollection',features:[]}},
-    },
-    layers: [
-      // 1. Black background
-      {id:'bg', type:'background', paint:{'background-color':'#09090f'}},
-      // 2. Dark map tiles
-      {id:'carto', type:'raster', source:'carto'},
-      // 3. Trail lines — below aircraft
-      {id:'trails', type:'line', source:'tr',
-        paint:{'line-color':['get','color'],'line-opacity':['get','op'],'line-width':['get','w']},
-        layout:{'line-cap':'round','line-join':'round'}},
-      // 4. Heading ticks
-      {id:'ticks', type:'line', source:'ticks',
-        paint:{'line-color':['get','color'],'line-width':1.5,'line-opacity':0.85},
-        layout:{'line-cap':'round'}},
-      // 5. Glow halo (blurred, behind dot)
-      {id:'ac-glow', type:'circle', source:'ac',
-        filter:['==',['get','ground'],0],
-        paint:{
-          'circle-radius':['interpolate',['linear'],['zoom'],3,10,6,16,10,22],
-          'circle-color':['get','color'],
-          'circle-opacity':0.25,
-          'circle-blur':0.8,
-        }},
-      // 6. Main dot — ON TOP of everything including map labels
-      {id:'ac-dot', type:'circle', source:'ac',
-        paint:{
-          'circle-radius':['interpolate',['linear'],['zoom'],3,3,6,5,10,7,14,10],
-          'circle-color':['get','color'],
-          'circle-opacity':1,
-          'circle-stroke-width':1.5,
-          'circle-stroke-color':'#ffffff',
-          'circle-stroke-opacity':0.5,
-        }},
-    ],
-  },
+  style: 'https://tiles.openfreemap.org/styles/dark',
   center: [-95, 37],
   zoom: 4,
   pitch: 62,
@@ -152,13 +99,8 @@ const mlmap = new maplibregl.Map({
   antialias: true,
   attributionControl: false,
 });
-
 mlmap.addControl(new maplibregl.NavigationControl({visualizePitch:true}),'bottom-right');
-mlmap.on('error',e=>log('MapErr: '+(e.error?.message||e.sourceId||'?'),'#f80'));
-
-mlmap.on('click','ac-dot',e=>{if(e.features[0])openPanel(e.features[0].properties.hex)});
-mlmap.on('mouseenter','ac-dot',()=>mlmap.getCanvas().style.cursor='pointer');
-mlmap.on('mouseleave','ac-dot',()=>mlmap.getCanvas().style.cursor='');
+mlmap.on('error',e=>log('MapErr:'+(e.error?.message||e.sourceId||'?'),'#f80'));
 
 // ── STATE ────────────────────────────────────────────────────
 const REFRESH=10000;
@@ -198,8 +140,7 @@ function buildGeo(){
   const vis=getVis();
   const acF=vis.map(a=>({type:'Feature',
     geometry:{type:'Point',coordinates:[a.lon,a.lat]},
-    properties:{hex:a.hex,color:hexC(getAlt(a)),rotation:a.track??0,
-      alt:getAlt(a)??0,ground:onGround(a)?1:0}
+    properties:{hex:a.hex,color:hexC(getAlt(a)),alt:getAlt(a)??0,ground:onGround(a)?1:0}
   }));
   const tickF=[];
   for(const a of vis){
@@ -213,34 +154,65 @@ function buildGeo(){
   const trF=[];
   for(const a of vis){
     const t=trails[a.hex]||[];
-    // Draw full trail as one multi-segment line per aircraft for continuity
-    if(t.length>=2){
-      for(let i=1;i<t.length;i++){
-        const p=i/t.length;
-        trF.push({type:'Feature',
-          geometry:{type:'LineString',coordinates:[[t[i-1].lng,t[i-1].lat],[t[i].lng,t[i].lat]]},
-          properties:{color:hexC(t[i].alt),op:p*(selHex===a.hex?0.85:0.55),w:p*(selHex===a.hex?2.5:1.6)}
-        });
-      }
+    for(let i=1;i<t.length;i++){
+      const p=i/t.length;
+      trF.push({type:'Feature',
+        geometry:{type:'LineString',coordinates:[[t[i-1].lng,t[i-1].lat],[t[i].lng,t[i].lat]]},
+        properties:{color:hexC(t[i].alt),op:p*(selHex===a.hex?0.85:0.55),w:p*(selHex===a.hex?2.5:1.6)}
+      });
     }
   }
   return{acF,tickF,trF};
 }
 
 function render(){
+  if(!ready)return;
   const{acF,tickF,trF}=buildGeo();
   mlmap.getSource('ac')?.setData({type:'FeatureCollection',features:acF});
   mlmap.getSource('ticks')?.setData({type:'FeatureCollection',features:tickF});
   mlmap.getSource('tr')?.setData({type:'FeatureCollection',features:trF});
 }
 
-// ── MAP READY ────────────────────────────────────────────────
+// ── LAYERS: added after map style loads, on top of everything ─
 mlmap.on('load',()=>{
+  log('Map loaded ✓');
+
+  mlmap.addSource('tr',   {type:'geojson',data:{type:'FeatureCollection',features:[]}});
+  mlmap.addSource('ticks',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+  mlmap.addSource('ac',   {type:'geojson',data:{type:'FeatureCollection',features:[]}});
+
+  mlmap.addLayer({id:'trails',type:'line',source:'tr',
+    paint:{'line-color':['get','color'],'line-opacity':['get','op'],'line-width':['get','w']},
+    layout:{'line-cap':'round','line-join':'round'}});
+
+  mlmap.addLayer({id:'ac-ticks',type:'line',source:'ticks',
+    paint:{'line-color':['get','color'],'line-width':2,'line-opacity':0.9},
+    layout:{'line-cap':'round'}});
+
+  mlmap.addLayer({id:'ac-glow',type:'circle',source:'ac',
+    filter:['==',['get','ground'],0],
+    paint:{
+      'circle-radius':['interpolate',['linear'],['zoom'],3,10,6,16,10,22],
+      'circle-color':['get','color'],'circle-opacity':0.22,'circle-blur':0.8,
+    }});
+
+  mlmap.addLayer({id:'ac-dot',type:'circle',source:'ac',
+    paint:{
+      'circle-radius':['interpolate',['linear'],['zoom'],3,3,5,4,8,6,11,9,14,12],
+      'circle-color':['get','color'],
+      'circle-opacity':1,
+      'circle-stroke-width':1.5,
+      'circle-stroke-color':'#fff',
+      'circle-stroke-opacity':0.45,
+    }});
+
+  mlmap.on('click','ac-dot',e=>{if(e.features[0])openPanel(e.features[0].properties.hex)});
+  mlmap.on('mouseenter','ac-dot',()=>mlmap.getCanvas().style.cursor='pointer');
+  mlmap.on('mouseleave','ac-dot',()=>mlmap.getCanvas().style.cursor='');
+
   ready=true;
-  log('Map loaded ✓ — fetching…');
-  document.getElementById('st').textContent='map ready';
-  fetchAircraft();
-  startBar();
+  log('Layers ready ✓ — fetching…');
+  fetchAircraft();startBar();
   timer=setInterval(()=>{fetchAircraft();startBar();},REFRESH);
 });
 
@@ -250,8 +222,8 @@ async function fetchAircraft(){
   const lat=c.lat.toFixed(3),lon=c.lng.toFixed(3);
   const zoom=mlmap.getZoom();
   const nm=zoom<5?250:zoom<7?200:zoom<9?120:60;
-  log(`Fetching ${lat},${lon} r=${nm}nm`,'#888');
-  const attempts=[
+  log(`Fetch ${lat},${lon} r=${nm}nm`,'#888');
+  const eps=[
     [`https://api.airplanes.live/v2/point/${lat}/${lon}/${nm}`,'airplanes.live'],
     [`https://api.adsb.one/v2/point/${lat}/${lon}/${nm}`,'adsb.one'],
     [`https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${nm}`,'adsb.fi'],
@@ -259,19 +231,17 @@ async function fetchAircraft(){
     [`https://corsproxy.io/?url=${encodeURIComponent(`https://api.airplanes.live/v2/point/${lat}/${lon}/${nm}`)}`,'corsproxy'],
     [`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.airplanes.live/v2/point/${lat}/${lon}/${nm}`)}`,'allorigins'],
   ];
-  for(const[url,label]of attempts){
+  for(const[url,label]of eps){
     try{
       const r=await fetch(url,{mode:'cors',cache:'no-store',signal:AbortSignal.timeout(9000)});
       if(!r.ok){log(`${label}: HTTP ${r.status}`,'#f80');continue;}
       const d=await r.json();
       const list=d.aircraft??d.ac??d.planes??d.data??[];
-      if(!Array.isArray(list)||list.length===0){log(`${label}: ${list.length??'bad'} results`,'#f80');continue;}
+      if(!Array.isArray(list)||list.length===0){log(`${label}: 0 results`,'#f80');continue;}
       aircraft=list.filter(a=>a.lat!=null&&a.lon!=null);
-      // Seed trails from initial positions so lines appear immediately
       for(const a of aircraft){
-        if(!trails[a.hex]) trails[a.hex]=[];
-        const t=trails[a.hex];
-        if(t.length===0) t.push({lng:a.lon,lat:a.lat,alt:getAlt(a)});
+        if(!trails[a.hex])trails[a.hex]=[];
+        if(!trails[a.hex].length)trails[a.hex].push({lng:a.lon,lat:a.lat,alt:getAlt(a)});
       }
       updateTrails();render();
       document.getElementById('sa').textContent=aircraft.filter(a=>!onGround(a)).length.toLocaleString();
@@ -281,7 +251,7 @@ async function fetchAircraft(){
       document.getElementById('st2').textContent=alts.length?Math.max(...alts).toLocaleString()+' ft':'—';
       document.getElementById('st').textContent=`${new Date().toLocaleTimeString()} · ${label}`;
       document.getElementById('ct').textContent=`${aircraft.length.toLocaleString()} aircraft`;
-      log(`✓ ${label} — ${aircraft.length} aircraft`,'#0f0');
+      log(`✓ ${label} — ${aircraft.length} ac`,'#0f0');
       return;
     }catch(e){log(`${label}: ${e.message}`,'#f80');}
   }
@@ -337,7 +307,6 @@ function startBar(){
   p.style.transition='none';p.style.width='0%';
   requestAnimationFrame(()=>requestAnimationFrame(()=>{p.style.transition=`width ${REFRESH}ms linear`;p.style.width='100%'}));
 }
-
 mlmap.on('moveend',()=>{
   if(!ready)return;
   clearInterval(timer);fetchAircraft();startBar();
